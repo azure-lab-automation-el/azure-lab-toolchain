@@ -1,0 +1,32 @@
+name: build-toolchain
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths: ['Dockerfile', '.github/workflows/build.yml']
+permissions: { contents: read, packages: write }
+concurrency: { group: toolchain-build, cancel-in-progress: true }
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with: { registry: ghcr.io, username: ${{ github.actor }}, password: ${{ secrets.GITHUB_TOKEN }} }
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Measure cold pull and verify tools
+        run: |
+          img=ghcr.io/${{ github.repository }}:latest
+          start=$(date +%s); docker pull "$img" -q; echo "PULL_SECONDS=$(( $(date +%s) - start ))"
+          docker run --rm "$img" bash -c 'az version | head -3; bicep --version; gh --version | head -1; rclone version | head -1; git --version; jq --version'
+          docker images "$img" --format 'IMAGE_SIZE {{.Size}}'
